@@ -1,17 +1,18 @@
 # -*- coding: utf-8 -*-
-"""GitHub Actions 版：电脑关机时也能把当天计划发到 QQ 私聊。
+"""云端兜底：在 GitHub Actions 上画计划卡并发到 QQ 私聊。
 
-与本地 push_qq.py 的差别只有两点：
-1. 只发文字（Ubuntu runner 没中文字体，画图要额外装字体）
-2. 计划表从仓库里的 plan_days.json 读，凭证从环境变量读
+和本地 push_qq.py 同一套画法（card_pil），差别：
+- 字体走候选列表，云端靠 apt 装 Noto CJK
+- 凭证从环境变量读：QQ_APP_ID / QQ_APP_SECRET / QQ_OPENID
 
-环境变量：QQ_APP_ID / QQ_APP_SECRET / QQ_OPENID
 用法：
-    python send.py            # 发今天
-    python send.py --dry      # 只打印，不发
-    python send.py 2026-11-25 # 发指定日期（补发/测试用）
+    python send.py            # 画图并发送今天
+    python send.py --dry      # 只画图，打印路径
+    python send.py --text     # 发纯文字（图发不出去时的退路）
+    python send.py 2026-11-25 # 指定日期（补发/测试）
 """
 import argparse
+import base64
 import json
 import os
 import sys
@@ -21,7 +22,12 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-DATA = HERE / "plan_days.json"
+sys.path.insert(0, str(HERE))
+
+import card_pil  # noqa: E402
+
+DATA = card_pil.DATA
+PNG = card_pil.PNG
 TOKEN_URL = "https://bots.qq.com/app/getAppAccessToken"
 API = "https://api.sgroup.qq.com"
 BJT = timezone(timedelta(hours=8))
@@ -36,7 +42,8 @@ def find_day(days, d):
     return next((x for x in days if x["d"] == d), None)
 
 
-def render(days, day, d):
+def render_text(days, day, d):
+    """--text 模式用的纯文本版。"""
     idx = [x["d"] for x in days].index(d.isoformat()) + 1
     left = (EXAM - d).days
     out = ["考研冲刺 · D%d" % idx,
@@ -46,15 +53,12 @@ def render(days, day, d):
            ""]
     for it in day["items"]:
         t = it["t"].strip()
-        r = it["r"].strip()
         head = t.split(" ", 1)[0]
         if " " in t and head[:1].isdigit():
-            # "08:30–11:30 数学"：时间和科目分两行
             out.append(t)
-            out.append("  " + r)
+            out.append("  " + it["r"].strip())
         else:
-            # "07:00–07:20" / "穿插"：标签和内容并成一行
-            out.append("%s  %s" % (t, r))
+            out.append("%s  %s" % (t, it["r"].strip()))
         out.append("")
     out.append("————————")
     out.append("做到 4 小时，这天就不算废。")
@@ -65,7 +69,7 @@ def post(url, payload, headers, timeout=60):
     req = urllib.request.Request(
         url,
         data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-        headers=dict({"Content-Type": "application/json"}, **headers),
+        headers={"Content-Type": "application/json", **headers},
         method="POST")
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
@@ -82,6 +86,20 @@ def get_token(app_id, secret):
     return d["access_token"]
 
 
+def send_image(token, openid, png, caption):
+    up = post(API + "/v2/users/%s/files" % openid,
+              {"file_type": 1,
+               "file_data": base64.b64encode(png.read_bytes()).decode(),
+               "srv_send_msg": False},
+              {"Authorization": "QQBot " + token})
+    info = up.get("file_info")
+    if not info:
+        raise SystemExit("图片上传失败: " + json.dumps(up, ensure_ascii=False)[:400])
+    return post(API + "/v2/users/%s/messages" % openid,
+                {"content": caption, "msg_type": 7, "media": {"file_info": info}},
+                {"Authorization": "QQBot " + token})
+
+
 def send_text(token, openid, text):
     return post(API + "/v2/users/%s/messages" % openid,
                 {"content": text, "msg_type": 0},
@@ -92,6 +110,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("date", nargs="?", default=None)
     ap.add_argument("--dry", action="store_true")
+    ap.add_argument("--text", action="store_true")
     a = ap.parse_args()
 
     d = date.fromisoformat(a.date) if a.date else today_bj()
@@ -101,10 +120,24 @@ def main():
         print("NO_PLAN %s 不在计划表里" % d)
         sys.exit(1)
 
-    text = render(days, day, d)
-    if a.dry:
-        print(text)
-        return
+    left = (EXAM - d).days
+    caption = "距初试 %d 天 · %s %s" % (left, day["md"], day["wd"])
+
+    if a.text:
+        if a.dry:
+            print(render_text(days, day, d))
+            return
+        body, image = render_text(days, day, d), None
+    else:
+        if not card_pil.build(d.isoformat()):
+            print("NO_PLAN 卡片没生成出来 %s" % d)
+            sys.exit(1)
+        if a.dry:
+            from PIL import Image
+            w, h = Image.open(PNG).size
+            print("DRY png=%s %.1fKB %dx%d" % (PNG, PNG.stat().st_size / 1024, w, h))
+            return
+        body, image = caption, PNG
 
     app_id = os.environ.get("QQ_APP_ID", "").strip()
     secret = os.environ.get("QQ_APP_SECRET", "").strip()
@@ -113,7 +146,8 @@ def main():
         raise SystemExit("缺环境变量 QQ_APP_ID / QQ_APP_SECRET / QQ_OPENID")
 
     token = get_token(app_id, secret)
-    r = send_text(token, openid, text)
+    r = (send_text(token, openid, body) if image is None
+         else send_image(token, openid, image, body))
     ok = "id" in r or r.get("code") == 0
     print(("已发送 %s " % d) + json.dumps(r, ensure_ascii=False)[:300])
     sys.exit(0 if ok else 2)
