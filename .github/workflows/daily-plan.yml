@@ -20,7 +20,13 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: 发送当天计划
+      - name: 装中文字体和 Pillow
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq fonts-noto-cjk
+          python -m pip install --quiet pillow
+
+      - name: 画卡并发送
         env:
           QQ_APP_ID: ${{ secrets.QQ_APP_ID }}
           QQ_APP_SECRET: ${{ secrets.QQ_APP_SECRET }}
