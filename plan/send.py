@@ -21,6 +21,8 @@ import urllib.request
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
+from PIL import Image
+
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
@@ -138,6 +140,7 @@ def main():
             print("DRY png=%s %.1fKB %dx%d" % (PNG, PNG.stat().st_size / 1024, w, h))
             return
         body, image = caption, PNG
+        print("卡片: %dx%d 字体=%s" % (*Image.open(PNG).size, Path(card_pil.REG).name))
 
     app_id = os.environ.get("QQ_APP_ID", "").strip()
     secret = os.environ.get("QQ_APP_SECRET", "").strip()
