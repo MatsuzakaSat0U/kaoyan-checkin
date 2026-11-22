@@ -2,8 +2,11 @@ name: daily-plan
 
 on:
   schedule:
-    # UTC 00:00 = 北京时间 08:00；GitHub 定时常有 5–30 分钟延迟
-    - cron: "0 0 * * *"
+    # 全部是 UTC，北京时间 = UTC+8
+    - cron: "30 23 * * *"   # 07:30 当天计划卡
+    - cron: "0 4 * * *"     # 12:00 问上午
+    - cron: "0 10 * * *"    # 18:00 问下午
+    - cron: "0 14 * * *"    # 22:00 问晚上 + 全天收尾
   workflow_dispatch: {}
 
 permissions:
@@ -26,9 +29,20 @@ jobs:
           sudo apt-get install -y -qq fonts-noto-cjk
           python -m pip install --quiet pillow
 
-      - name: 画卡并发送
+      - name: 按北京时间选动作
         env:
           QQ_APP_ID: ${{ secrets.QQ_APP_ID }}
           QQ_APP_SECRET: ${{ secrets.QQ_APP_SECRET }}
           QQ_OPENID: ${{ secrets.QQ_OPENID }}
-        run: python plan/send.py
+        run: |
+          H=$(TZ=Asia/Shanghai date +%-H)
+          echo "北京时间 ${H} 点"
+          if [ "$H" -lt 11 ]; then
+            python plan/send.py
+          elif [ "$H" -lt 16 ]; then
+            python plan/checkin.py morning
+          elif [ "$H" -lt 21 ]; then
+            python plan/checkin.py afternoon
+          else
+            python plan/checkin.py evening
+          fi
