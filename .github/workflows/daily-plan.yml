@@ -1,0 +1,28 @@
+name: daily-plan
+
+on:
+  schedule:
+    # UTC 00:00 = 北京时间 08:00；GitHub 定时常有 5–30 分钟延迟
+    - cron: "0 0 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  push:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 发送当天计划
+        env:
+          QQ_APP_ID: ${{ secrets.QQ_APP_ID }}
+          QQ_APP_SECRET: ${{ secrets.QQ_APP_SECRET }}
+          QQ_OPENID: ${{ secrets.QQ_OPENID }}
+        run: python plan/send.py
