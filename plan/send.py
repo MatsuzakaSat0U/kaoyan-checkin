@@ -24,6 +24,7 @@ sys.path.insert(0, str(HERE))
 
 import card_pil  # noqa: E402
 import qqapi  # noqa: E402
+import state  # noqa: E402
 
 DATA = card_pil.DATA
 PNG = card_pil.PNG
@@ -79,6 +80,11 @@ def main():
     left = (EXAM - d).days
     caption = "距初试 %d 天 · %s %s" % (left, day["md"], day["wd"])
 
+    done = {} if a.dry else state.load(d.isoformat())
+    if done.get("card"):
+        print("SKIP %s 今天已经发过计划卡" % d)
+        return
+
     if a.text:
         if a.dry:
             print(render_text(days, day, d))
@@ -101,6 +107,9 @@ def main():
          else qqapi.send_image(token, openid, image, body))
     ok = "id" in r or r.get("code") == 0
     print(("已发送 %s " % d) + json.dumps(r, ensure_ascii=False)[:300])
+    if ok:
+        done["card"] = True
+        state.save(d.isoformat(), done)
     sys.exit(0 if ok else 2)
 
 
