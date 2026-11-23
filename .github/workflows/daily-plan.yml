@@ -3,14 +3,24 @@ name: daily-plan
 on:
   schedule:
     # 全部是 UTC，北京时间 = UTC+8
-    - cron: "30 23 * * *"   # 07:30 当天计划卡
-    - cron: "0 4 * * *"     # 12:00 问上午
-    - cron: "0 10 * * *"    # 18:00 问下午
-    - cron: "0 14 * * *"    # 22:00 问晚上 + 全天收尾
-  workflow_dispatch: {}
+    # 每个时点给两次机会：GitHub 定时会丢、会延迟，第一条没跑第二条补
+    - cron: "30 23 * * *"   # 07:30 计划卡
+    - cron: "10 0 * * *"    # 08:10 计划卡（补）
+    - cron: "50 0 * * *"    # 08:50 计划卡（补）
+    - cron: "55 3 * * *"    # 11:55 问上午
+    - cron: "20 4 * * *"    # 12:20 问上午（补）
+    - cron: "55 9 * * *"    # 17:55 问下午
+    - cron: "20 10 * * *"   # 18:20 问下午（补）
+    - cron: "55 13 * * *"   # 21:55 问晚上
+    - cron: "20 14 * * *"   # 22:20 问晚上（补）
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "选 auto 按现在的时间走，或指定 card / morning / afternoon / evening 补发"
+        default: "auto"
 
 permissions:
-  contents: read
+  contents: write           # 写 _state/<日期>.json，避免重复推送
 
 jobs:
   push:
@@ -34,15 +44,25 @@ jobs:
           QQ_APP_ID: ${{ secrets.QQ_APP_ID }}
           QQ_APP_SECRET: ${{ secrets.QQ_APP_SECRET }}
           QQ_OPENID: ${{ secrets.QQ_OPENID }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           H=$(TZ=Asia/Shanghai date +%-H)
-          echo "北京时间 ${H} 点"
-          if [ "$H" -lt 11 ]; then
-            python plan/send.py
-          elif [ "$H" -lt 16 ]; then
-            python plan/checkin.py morning
-          elif [ "$H" -lt 21 ]; then
-            python plan/checkin.py afternoon
-          else
-            python plan/checkin.py evening
-          fi
+          MODE="${{ inputs.mode }}"
+          echo "北京时间 ${H} 点，mode=${MODE:-auto}"
+          case "$MODE" in
+            card)        python plan/send.py ;;
+            morning)     python plan/checkin.py morning ;;
+            afternoon)   python plan/checkin.py afternoon ;;
+            evening)     python plan/checkin.py evening ;;
+            *)
+              if [ "$H" -lt 11 ]; then
+                python plan/send.py
+              elif [ "$H" -lt 16 ]; then
+                python plan/checkin.py morning
+              elif [ "$H" -lt 21 ]; then
+                python plan/checkin.py afternoon
+              else
+                python plan/checkin.py evening
+              fi
+              ;;
+          esac
