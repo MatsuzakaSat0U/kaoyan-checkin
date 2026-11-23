@@ -19,6 +19,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
 import qqapi  # noqa: E402
+import state  # noqa: E402
 
 DATA = HERE / "plan_days.json"
 if not DATA.exists():
@@ -124,11 +125,19 @@ def main():
         print(text)
         return
 
+    done = state.load(d.isoformat())
+    if done.get(a.slot):
+        print("SKIP %s 的 %s 已经问过了" % (d, LABEL[a.slot]))
+        return
+
     app_id, secret, openid = qqapi.creds()
     token = qqapi.get_token(app_id, secret)
     r = qqapi.send_text(token, openid, text)
     ok = "id" in r or r.get("code") == 0
     print(("已发送 %s %s " % (d, a.slot)) + json.dumps(r, ensure_ascii=False)[:200])
+    if ok:
+        done[a.slot] = True
+        state.save(d.isoformat(), done)
     sys.exit(0 if ok else 2)
 
 
